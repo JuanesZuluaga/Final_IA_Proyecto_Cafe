@@ -1,43 +1,72 @@
+"""Red de juicio experto y CSP implementados con Python estándar."""
+from dataclasses import dataclass
 
-import random
+# P(ambiente húmedo | HR alta, lluvia), en ese orden.
+HUMECTACION = {(False, False): .10, (False, True): .65,
+               (True, False): .60, (True, True): .95}
+# P(ambiente favorable | temperatura compatible, ambiente húmedo).
+FAVORABLE = {(False, False): .05, (False, True): .25,
+             (True, False): .15, (True, True): .85}
 
-# Parte 1.1: Red Bayesiana (Simulada con tabla de probabilidad condicional para no depender de pgmpy)
-# Calcula el riesgo de roya basado en Temperatura y Humedad
-def calcular_riesgo_roya(temperatura, humedad):
-    prob_roya = 0.1 # Base
-    
-    if temperatura > 21 and temperatura < 25:
-        prob_roya += 0.4
-    elif temperatura >= 25:
-        prob_roya += 0.2
-        
-    if humedad > 85:
-        prob_roya += 0.4
-    elif humedad > 75:
-        prob_roya += 0.2
-        
-    prob_roya = min(prob_roya, 0.95)
-    
-    if prob_roya > 0.7:
-        return "ALTO", prob_roya
-    elif prob_roya > 0.4:
-        return "MEDIO", prob_roya
-    else:
-        return "BAJO", prob_roya
 
-# Parte 1.2: Problema de Satisfacción de Restricciones (CSP) Simple para Agendar Labores
-# Restricciones: No fertilizar si llueve mucho, no cosechar si llueve mucho.
-def agendar_labores(datos_clima_proximos_dias):
-    agenda = {}
-    for dia in datos_clima_proximos_dias:
-        fecha = dia['fecha']
-        lluvia = dia['precipitacion']
-        
-        if lluvia < 2.0:
-            agenda[fecha] = "Cosecha / Poda"
-        elif lluvia >= 2.0 and lluvia < 10.0:
-            agenda[fecha] = "Fertilización (suelo húmedo)"
-        else:
-            agenda[fecha] = "Mantenimiento bajo techo (Lluvia fuerte)"
-            
-    return agenda
+def riesgo(dia):
+    compatible = 18 <= dia["temperatura"] <= 25
+    humeda = HUMECTACION[dia["humedad"] >= 85, dia["precipitacion"] >= 2]
+    indice = (1 - humeda) * FAVORABLE[compatible, False] + humeda * FAVORABLE[compatible, True]
+    return {"nivel": "alto" if indice >= .65 else "medio" if indice >= .35 else "bajo",
+            "indice": round(indice, 3), "clima": dia,
+            "interpretacion": "Favorabilidad climática de un modelo didáctico sin calibrar. No estima incidencia ni diagnostica roya."}
+
+
+@dataclass(frozen=True)
+class Labor:
+    nombre: str
+    personas: int
+    lluvia_max: float | None
+    prioridad: int
+
+
+LABORES = (
+    Labor("Cosecha", 2, 4, 5),
+    Labor("Monitoreo de roya", 1, 8, 4),
+    Labor("Fertilización", 2, 6, 3),
+    Labor("Mantenimiento bajo techo", 1, None, 1),
+)
+
+
+def agendar(dias, cuadrilla, *, base=False):
+    """Una fecha o aplazamiento por labor; capacidad se reinicia cada día."""
+    capacidad = [cuadrilla] * len(dias)
+    dominios = [
+        [i for i, d in enumerate(dias) if d["precipitacion"] is not None
+         and cuadrilla >= labor.personas
+         and (labor.lluvia_max is None or d["precipitacion"] <= labor.lluvia_max)]
+        for labor in LABORES
+    ]
+    mejor, solucion = (-1, 0), ()
+
+    def buscar(asignacion, puntos, demora):
+        nonlocal mejor, solucion
+        i = len(asignacion)
+        if i == len(LABORES):
+            objetivo = (puntos, -demora)
+            if objetivo > mejor:
+                mejor, solucion = objetivo, asignacion
+            return
+        if puntos + sum(l.prioridad for l in LABORES[i:]) < mejor[0]:
+            return
+        labor = LABORES[i]
+        for j in dominios[i]:
+            if capacidad[j] >= labor.personas:
+                capacidad[j] -= labor.personas
+                buscar(asignacion + (j,), puntos + labor.prioridad, demora + j)
+                capacidad[j] += labor.personas
+                if base:
+                    return
+        buscar(asignacion + (None,), puntos, demora)
+
+    buscar((), 0, 0)
+    return {"prioridad_total": mejor[0], "demora_total": -mejor[1],
+            "labores": [{"labor": l.nombre, "fecha": dias[j]["fecha"] if j is not None else None,
+                         "personas": l.personas, "limite_mm_demo": l.lluvia_max}
+                        for l, j in zip(LABORES, solucion)]}

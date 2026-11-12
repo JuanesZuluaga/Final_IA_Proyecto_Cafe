@@ -1,93 +1,110 @@
+"""Dashboard histórico y chat agroclimático."""
+from datetime import date, timedelta
+import os
 
-import streamlit as st
 import pandas as pd
-from ia_clasica import calcular_riesgo_roya, agendar_labores
-from agente import consultar_agente
-import datetime
+import streamlit as st
 
-st.set_page_config(page_title="Asistente Agroclimático Café", layout="wide")
+from agente import consultar
+from clima import FUENTE, cargar, ventana
+from ia_clasica import agendar, riesgo
+from rag import buscar
 
-st.title("🌱 Asistente Agroclimático para Café")
-st.markdown("Plataforma integrada de IA para la gestión del riesgo de roya y labores agrícolas.")
+st.set_page_config(page_title="Asistente agroclimático para café", page_icon="☕", layout="wide")
+st.title("Asistente agroclimático para café")
+st.caption("Antioquia · Histórico diario de 2024 · SI3003")
 
-# --- BARRA LATERAL (Parámetros) ---
-st.sidebar.header("⚙️ Configuración")
-api_key = st.sidebar.text_input("OpenAI API Key (para el Agente):", type="password")
-municipio = st.sidebar.selectbox("Municipio / Finca:", ["Marinilla (Finca La Esperanza)", "Andes (Finca El Mirador)"])
-fecha_consulta = st.sidebar.date_input("Fecha de Análisis:", datetime.date(2026, 11, 4))
+datos = st.cache_data(cargar)()
+municipio = st.sidebar.selectbox("Municipio de referencia", list(datos))
+serie = datos[municipio]
+fecha = st.sidebar.selectbox("Fecha del escenario", sorted(serie), index=min(119, len(serie) - 1), key=f"fecha_{municipio}")
+dias = st.sidebar.slider("Días de planificación", 2, 7, 5)
+personas = st.sidebar.slider("Personas disponibles por día", 1, 6, 2)
+contexto = dict(municipio=municipio, fecha=fecha, serie=serie, dias=dias, personas=personas)
+dia = serie[fecha]
+evaluacion = riesgo(dia)
+plan = ventana(serie, fecha, dias)
+agenda = agendar(plan, personas)
+clima_tab, agenda_tab, chat_tab = st.tabs(["Clima y alerta", "Calendario de labores", "Asistente"])
 
-# Cargar Datos Mock
-@st.cache_data
-def load_data():
-    return pd.read_csv("data/clima_historico.csv")
+with clima_tab:
+    a, b, c, d = st.columns(4)
+    a.metric("Temperatura media", f"{dia['temperatura']:.1f} °C")
+    b.metric("Humedad relativa", f"{dia['humedad']:.1f} %")
+    c.metric("Precipitación", f"{dia['precipitacion']:.1f} mm")
+    d.metric("Favorabilidad para roya", evaluacion["nivel"].capitalize())
+    st.caption(evaluacion["interpretacion"])
+    inicio = (date.fromisoformat(fecha) - timedelta(days=29)).isoformat()
+    historial = [r for f, r in sorted(serie.items()) if inicio <= f <= fecha]
+    marco = pd.DataFrame([{**r, "favorabilidad": riesgo(r)["indice"]} for r in historial])
+    marco["fecha"] = pd.to_datetime(marco["fecha"])
+    marco = marco.set_index("fecha")
+    a, b = st.columns(2)
+    a.subheader("Precipitación diaria · mm")
+    a.bar_chart(marco["precipitacion"])
+    b.subheader("Índice de favorabilidad · 0 a 1")
+    b.line_chart(marco["favorabilidad"])
+    st.caption(f"Últimos 30 días hasta {fecha}. [NASA POWER]({FUENTE}) aporta datos de rejilla para puntos de referencia.")
 
-df = load_data()
-df['fecha'] = pd.to_datetime(df['fecha']).dt.date
+with agenda_tab:
+    st.caption("Simulación retrospectiva con lluvia observada. Las restricciones de trabajo son didácticas.")
+    st.metric("Puntos de prioridad asignados", f"{agenda['prioridad_total']} de 13")
+    calendario = []
+    for r in plan:
+        labores = [l for l in agenda["labores"] if l["fecha"] == r["fecha"]]
+        calendario.append({"Fecha": r["fecha"], "Lluvia (mm)": r["precipitacion"],
+                           "Labores": ", ".join(l["labor"] for l in labores) or "—",
+                           "Personas asignadas": sum(l["personas"] for l in labores)})
+    st.dataframe(calendario, hide_index=True)
+    aplazadas = [l["labor"] for l in agenda["labores"] if l["fecha"] is None]
+    if aplazadas:
+        st.info("Aplazadas: " + ", ".join(aplazadas))
+    if any(r["precipitacion"] is None for r in plan):
+        st.warning("Los días sin datos quedan fuera de la planificación.")
 
-# Obtener datos del día seleccionado
-datos_dia = df[df['fecha'] == fecha_consulta]
+with chat_tab:
+    modo = st.radio("Modo", ["Consulta local", "Agente LLM"], horizontal=True)
+    clave = ""
+    if modo == "Agente LLM":
+        clave = st.text_input("Clave de OpenAI", type="password") or os.getenv("OPENAI_API_KEY", "")
+        st.caption("El agente envía la pregunta, el historial reciente y los resultados de herramientas a OpenAI.")
+    else:
+        st.caption("Busca referencias en el corpus local sin enviar la consulta a un proveedor.")
+    escenario = (municipio, fecha, dias, personas, modo)
+    if st.session_state.get("escenario") != escenario:
+        st.session_state.update(escenario=escenario, conversacion=[])
+    conversacion = st.session_state.conversacion
 
-if datos_dia.empty:
-    st.warning("No hay datos históricos para esta fecha. Usando datos simulados.")
-    temp, hum, precip = 22.5, 82.0, 5.0
-else:
-    temp = datos_dia.iloc[0]['temperatura']
-    hum = datos_dia.iloc[0]['humedad']
-    precip = datos_dia.iloc[0]['precipitacion']
+    def mostrar(respuesta):
+        st.markdown(respuesta["texto"])
+        for doc in respuesta["fuentes"]:
+            st.markdown(f"[{doc['id']} · {doc['titulo']}]({doc['url']})")
+        if respuesta["trazas"]:
+            with st.expander("Llamadas a herramientas"):
+                st.json(respuesta["trazas"])
 
-contexto_actual = {'temperatura': temp, 'humedad': hum, 'precipitacion': precip}
-
-# --- TABS DEL DASHBOARD ---
-tab1, tab2, tab3 = st.tabs(["📊 Dashboard Climático & Clásica", "🗓️ CSP Labores", "🤖 Agente Inteligente (RAG)"])
-
-with tab1:
-    st.header("Condiciones Actuales y Riesgo de Roya (Red Bayesiana)")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Temperatura", f"{temp:.1f} °C")
-    col2.metric("Humedad", f"{hum:.1f} %")
-    col3.metric("Precipitación", f"{precip:.1f} mm")
-    
-    riesgo, prob = calcular_riesgo_roya(temp, hum)
-    st.subheader(f"⚠️ Riesgo Estimado de Roya: {riesgo}")
-    st.progress(prob)
-    st.caption("Calculado mediante inferencia probabilística basada en temperatura y humedad.")
-    
-    st.line_chart(df.set_index('fecha')[['temperatura', 'humedad']].tail(30))
-
-with tab2:
-    st.header("Planificación de Labores (CSP)")
-    st.markdown("Asignación de tareas restringida por condiciones climáticas de los próximos 5 días.")
-    
-    # Simular próximos 5 días
-    proximos_dias = []
-    for i in range(5):
-        proximos_dias.append({
-            'fecha': (fecha_consulta + datetime.timedelta(days=i)).strftime("%Y-%m-%d"),
-            'precipitacion': df['precipitacion'].sample().iloc[0] # random sample for demo
-        })
-    
-    agenda = agendar_labores(proximos_dias)
-    for f, labor in agenda.items():
-        st.info(f"**{f}**: {labor}")
-
-with tab3:
-    st.header("Chat con el Asistente Agroclimático")
-    st.markdown("Consulta recomendaciones basadas en manuales de Cenicafé. El agente conoce tu riesgo actual.")
-    
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            
-    if prompt := st.chat_input("Ej: ¿Qué fungicida recomiendas para riesgo alto?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    for pregunta, respuesta in conversacion:
         with st.chat_message("user"):
-            st.markdown(prompt)
-            
+            st.write(pregunta)
         with st.chat_message("assistant"):
-            with st.spinner("Consultando manuales..."):
-                respuesta = consultar_agente(prompt, api_key, contexto_actual)
-                st.markdown(respuesta)
-        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+            mostrar(respuesta)
+    pregunta = st.chat_input("Pregunta por el clima, la agenda o el manejo de roya",
+                             max_chars=800, disabled=modo == "Agente LLM" and not clave)
+    if pregunta:
+        with st.chat_message("user"):
+            st.write(pregunta)
+        with st.chat_message("assistant"):
+            if modo == "Consulta local":
+                docs = buscar(pregunta)
+                texto = "\n\n".join(f"[{d['id']}] {d['texto']}" for d in docs)
+                respuesta = dict(texto=texto or "No encontré referencias para esta consulta.", fuentes=docs, trazas=[])
+            else:
+                historial_chat = []
+                for anterior, salida in conversacion[-3:]:
+                    if not salida.get("error"):
+                        historial_chat.extend([{"role": "user", "content": anterior},
+                                               {"role": "assistant", "content": salida["texto"]}])
+                with st.spinner("Consultando al agente…"):
+                    respuesta = consultar(pregunta, contexto, api_key=clave, historial=historial_chat)
+            mostrar(respuesta)
+        conversacion.append((pregunta, respuesta))

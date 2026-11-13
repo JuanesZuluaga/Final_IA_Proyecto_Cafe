@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-from agente import consultar
+from agente import consultar, PROVEEDORES
 from clima import FUENTE, cargar, ventana
 from ia_clasica import agendar, riesgo
 from rag import buscar
@@ -65,12 +65,16 @@ with agenda_tab:
 with chat_tab:
     modo = st.radio("Modo", ["Consulta local", "Agente LLM"], horizontal=True)
     clave = ""
+    proveedor = "OpenAI"
     if modo == "Agente LLM":
-        clave = st.text_input("Clave de OpenAI", type="password") or os.getenv("OPENAI_API_KEY", "")
-        st.caption("El agente envía la pregunta, el historial reciente y los resultados de herramientas a OpenAI.")
+        proveedor = st.selectbox("Proveedor LLM", list(PROVEEDORES))
+        _, modelo_def, env_var = PROVEEDORES[proveedor]
+        clave = st.text_input(f"API key ({proveedor})", type="password") or os.getenv(env_var, "")
+        st.caption(f"El agente envía la pregunta, el historial reciente y los resultados de herramientas a {proveedor} "
+                   f"(modelo `{modelo_def}`). La clave también puede definirse en la variable de entorno `{env_var}`.")
     else:
         st.caption("Busca referencias en el corpus local sin enviar la consulta a un proveedor.")
-    escenario = (municipio, fecha, dias, personas, modo)
+    escenario = (municipio, fecha, dias, personas, modo, proveedor)
     if st.session_state.get("escenario") != escenario:
         st.session_state.update(escenario=escenario, conversacion=[])
     conversacion = st.session_state.conversacion
@@ -105,6 +109,7 @@ with chat_tab:
                         historial_chat.extend([{"role": "user", "content": anterior},
                                                {"role": "assistant", "content": salida["texto"]}])
                 with st.spinner("Consultando al agente…"):
-                    respuesta = consultar(pregunta, contexto, api_key=clave, historial=historial_chat)
+                    respuesta = consultar(pregunta, contexto, api_key=clave,
+                                          historial=historial_chat, proveedor=proveedor)
             mostrar(respuesta)
         conversacion.append((pregunta, respuesta))

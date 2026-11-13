@@ -53,12 +53,49 @@ python -m streamlit run app.py
 ### Modos del asistente
 
 - Consulta local: busca en el corpus sin enviar datos externos.
-- Agente LLM: usa el modelo de OpenAI con herramientas `risk`, `schedule` y `search_docs`.
+- Agente LLM: usa un modelo con herramientas `risk`, `schedule` y `search_docs`.
 
-Si prefieres usar el agente LLM, puedes:
+El agente funciona con cualquier endpoint compatible con OpenAI. Hay tres proveedores preconfigurados; se elige desde la barra del chat:
 
-- ingresar la clave en la interfaz, o
-- definir la variable de entorno `OPENAI_API_KEY` antes de ejecutar la app.
+| Proveedor | Modelo por defecto | Variable de entorno | Dónde obtener la clave |
+|-----------|--------------------|---------------------|------------------------|
+| OpenAI    | `gpt-4.1-mini`            | `OPENAI_API_KEY` | https://platform.openai.com/api-keys |
+| Groq      | `openai/gpt-oss-20b` | `GROQ_API_KEY`   | https://console.groq.com/keys |
+| NVIDIA    | `meta/llama-3.3-70b-instruct` | `NVIDIA_API_KEY` | https://build.nvidia.com (NIM) |
+
+Groq y NVIDIA NIM ofrecen capa gratuita, recomendada para controlar costos.
+
+Para usar el agente puedes:
+
+- elegir el proveedor e ingresar la clave directamente en la interfaz, o
+- definir la variable de entorno correspondiente antes de ejecutar la app, por ejemplo:
+
+```bash
+export GROQ_API_KEY="tu_clave"      # o OPENAI_API_KEY / NVIDIA_API_KEY
+python -m streamlit run app.py
+```
+
+### Comprobar que la clave se está usando
+
+En la pestaña del asistente, con el modo **Agente LLM**, usa el botón **"Probar conexión"**:
+hace una llamada mínima real al proveedor y muestra si la clave es válida y con qué
+modelo respondió, o el error exacto si falla. La leyenda "🔑 Clave: ..." indica además
+si la clave que se usará viene de la interfaz o de la variable de entorno.
+
+También puedes verificarlo desde la terminal, sin levantar la app:
+
+```bash
+export GROQ_API_KEY="tu_clave"
+python -m scripts.evaluar --check --proveedor Groq
+```
+
+Opcionalmente puedes forzar otro modelo con la variable `CAFE_MODEL`.
+
+> **Nota:** los proveedores retiran y renombran modelos con frecuencia. Si una
+> consulta falla con un error tipo `model ... does not exist` o `model_decommissioned`,
+> consulta la lista vigente del proveedor (p. ej. https://console.groq.com/docs/models)
+> y define el nombre actual con `CAFE_MODEL`, sin cambiar el código. El mensaje de
+> error de la app muestra el detalle devuelto por el proveedor para facilitar el diagnóstico.
 
 ## Datos del proyecto
 
@@ -93,11 +130,13 @@ El agente puede:
 Se incluye una evaluación reproducible con preguntas fijas:
 
 ```bash
-python -m scripts.evaluar
-python -m scripts.evaluar --llm
+python -m scripts.evaluar                        # proveedor simulado (sin clave)
+python -m scripts.evaluar --llm                  # agente real con OpenAI
+python -m scripts.evaluar --llm --proveedor Groq # agente real con Groq
 ```
 
-La segunda opción requiere una `OPENAI_API_KEY` válida.
+La evaluación en vivo requiere la variable de entorno del proveedor elegido
+(`OPENAI_API_KEY`, `GROQ_API_KEY` o `NVIDIA_API_KEY`).
 
 ## Archivos clave
 

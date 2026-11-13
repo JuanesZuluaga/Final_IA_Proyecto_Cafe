@@ -18,7 +18,9 @@ El LLM puede invocar `risk`, `schedule` y `search_docs`. Las primeras dos herram
 
 En 2.172 escenarios (dos municipios, 362 ventanas por municipio y tres tamaños de cuadrilla), ambos algoritmos respetaron las restricciones. El CSP obtuvo 18.937 puntos acumulados frente a 18.844 de la línea base, una diferencia de 0,49 %. Mejoró el puntaje en 31 casos y redujo la demora con igual puntaje en otros 226. Las ventanas se solapan y la evaluación mide el objetivo del planificador, sin inferir impacto en campo.
 
-Las 12 preguntas fijas pasaron la prueba de protocolo con un proveedor simulado. El simulador prescribe las llamadas esperadas y comprueba el intercambio con las herramientas y la resolución de citas. La selección de herramientas y la calidad de las respuestas del LLM requieren ejecutar la evaluación con una clave y revisar los textos contra las fuentes. El corpus es pequeño y la recuperación depende de la coincidencia léxica.
+Las 12 preguntas fijas pasaron la prueba de protocolo con un proveedor simulado (12/12). El simulador prescribe las llamadas esperadas y comprueba el intercambio con las herramientas y la resolución de citas; no evalúa la selección de herramientas del modelo real. Para medir esa selección y la calidad de las respuestas se ejecuta `python -m scripts.evaluar --llm --proveedor <OpenAI|Groq|NVIDIA>` con una clave válida y se revisan los textos contra las fuentes citadas. El corpus es pequeño y la recuperación depende de la coincidencia léxica (TF-IDF), lo que limita el recall ante sinónimos.
+
+El agente admite tres endpoints compatibles con OpenAI (OpenAI, Groq y NVIDIA NIM); los dos últimos tienen capa gratuita. Como los proveedores retiran modelos con frecuencia, el nombre del modelo es configurable con `CAFE_MODEL` y los errores del proveedor se devuelven como texto para facilitar el diagnóstico sin tumbar la app.
 
 La planificación usa retrospectivamente lluvia observada y límites didácticos. El índice requiere datos de incidencia por lote, variedad y estado del cultivo para una validación agronómica. La aplicación presenta el índice como favorabilidad climática.
 

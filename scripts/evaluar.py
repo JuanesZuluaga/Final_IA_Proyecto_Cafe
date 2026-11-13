@@ -6,7 +6,7 @@ import json
 import os
 from types import SimpleNamespace as NS
 
-from agente import consultar
+from agente import consultar, verificar_clave, PROVEEDORES
 from clima import cargar, ventana
 from ia_clasica import agendar, LABORES
 
@@ -74,17 +74,27 @@ def evaluar_csp(datos):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--llm", action="store_true", help="Evaluar en vivo con OPENAI_API_KEY.")
+    parser.add_argument("--llm", action="store_true", help="Evaluar en vivo con un proveedor LLM.")
+    parser.add_argument("--proveedor", default="OpenAI", choices=list(PROVEEDORES),
+                        help="Endpoint compatible con OpenAI: OpenAI, Groq o NVIDIA.")
+    parser.add_argument("--check", action="store_true",
+                        help="Solo verificar que la clave del proveedor funciona y salir.")
     args = parser.parse_args()
-    if args.llm and not os.getenv("OPENAI_API_KEY"):
-        parser.error("Configura OPENAI_API_KEY para ejecutar las 12 consultas en vivo.")
+    env_var = PROVEEDORES[args.proveedor][2]
+    if args.check:
+        prueba = verificar_clave(api_key=os.getenv(env_var, ""), proveedor=args.proveedor)
+        print(prueba["mensaje"])
+        return 0 if prueba["ok"] else 1
+    if args.llm and not os.getenv(env_var):
+        parser.error(f"Configura {env_var} para ejecutar las 12 consultas en vivo con {args.proveedor}.")
     datos = cargar()
     evaluar_csp(datos)
     contexto = dict(municipio="Andes", fecha="2024-04-29", serie=datos["Andes"], dias=5, personas=2)
-    print("Proveedor real" if args.llm else "Proveedor simulado: prueba el ciclo, no la selección del LLM.")
+    print(f"Proveedor real: {args.proveedor}" if args.llm
+          else "Proveedor simulado: prueba el ciclo, no la selección del LLM.")
     aciertos = 0
     for i, (pregunta, esperadas, busqueda) in enumerate(CASOS, 1):
-        respuesta = consultar(pregunta, contexto, api_key=os.getenv("OPENAI_API_KEY", ""),
+        respuesta = consultar(pregunta, contexto, api_key=os.getenv(env_var, ""), proveedor=args.proveedor,
                               cliente=None if args.llm else ClienteSimulado(esperadas, busqueda))
         llamadas = {t["herramienta"] for t in respuesta["trazas"] if t["ok"]}
         cita = bool(respuesta["fuentes"])

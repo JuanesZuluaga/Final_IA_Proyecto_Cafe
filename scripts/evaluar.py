@@ -6,7 +6,7 @@ import json
 import os
 from types import SimpleNamespace as NS
 
-from agente import consultar, PROVEEDORES
+from agente import consultar, verificar_clave, PROVEEDORES
 from clima import cargar, ventana
 from ia_clasica import agendar, LABORES
 
@@ -77,8 +77,14 @@ def main():
     parser.add_argument("--llm", action="store_true", help="Evaluar en vivo con un proveedor LLM.")
     parser.add_argument("--proveedor", default="OpenAI", choices=list(PROVEEDORES),
                         help="Endpoint compatible con OpenAI: OpenAI, Groq o NVIDIA.")
+    parser.add_argument("--check", action="store_true",
+                        help="Solo verificar que la clave del proveedor funciona y salir.")
     args = parser.parse_args()
     env_var = PROVEEDORES[args.proveedor][2]
+    if args.check:
+        prueba = verificar_clave(api_key=os.getenv(env_var, ""), proveedor=args.proveedor)
+        print(prueba["mensaje"])
+        return 0 if prueba["ok"] else 1
     if args.llm and not os.getenv(env_var):
         parser.error(f"Configura {env_var} para ejecutar las 12 consultas en vivo con {args.proveedor}.")
     datos = cargar()

@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-from agente import consultar, PROVEEDORES
+from agente import consultar, verificar_clave, PROVEEDORES
 from clima import FUENTE, cargar, ventana
 from ia_clasica import agendar, riesgo
 from rag import buscar
@@ -69,9 +69,18 @@ with chat_tab:
     if modo == "Agente LLM":
         proveedor = st.selectbox("Proveedor LLM", list(PROVEEDORES))
         _, modelo_def, env_var = PROVEEDORES[proveedor]
-        clave = st.text_input(f"API key ({proveedor})", type="password") or os.getenv(env_var, "")
+        clave_manual = st.text_input(f"API key ({proveedor})", type="password")
+        clave = clave_manual or os.getenv(env_var, "")
+        origen = "ingresada en la interfaz" if clave_manual else (
+            f"tomada de la variable `{env_var}`" if clave else "no configurada")
         st.caption(f"El agente envía la pregunta, el historial reciente y los resultados de herramientas a {proveedor} "
                    f"(modelo `{modelo_def}`). La clave también puede definirse en la variable de entorno `{env_var}`.")
+        col_estado, col_boton = st.columns([3, 1])
+        col_estado.caption(f"🔑 Clave: **{origen}**." + ("" if clave else " El chat está deshabilitado hasta ingresarla."))
+        if col_boton.button("Probar conexión", disabled=not clave):
+            with st.spinner(f"Verificando con {proveedor}…"):
+                prueba = verificar_clave(api_key=clave, proveedor=proveedor)
+            (st.success if prueba["ok"] else st.error)(prueba["mensaje"])
     else:
         st.caption("Busca referencias en el corpus local sin enviar la consulta a un proveedor.")
     escenario = (municipio, fecha, dias, personas, modo, proveedor)

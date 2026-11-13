@@ -45,6 +45,33 @@ def ejecutar(nombre, args, contexto):
     return {"error": "Herramienta o argumentos inválidos."}
 
 
+def verificar_clave(*, api_key="", proveedor="OpenAI", modelo="", base_url=""):
+    """Hace una llamada mínima real para confirmar que la clave y el modelo funcionan.
+
+    Devuelve {ok, proveedor, modelo, mensaje}. `ok=True` significa que el proveedor
+    aceptó la clave y respondió con el modelo indicado.
+    """
+    url, modelo_def, _ = PROVEEDORES.get(proveedor, PROVEEDORES["OpenAI"])
+    modelo = modelo or os.getenv("CAFE_MODEL", modelo_def)
+    if not api_key:
+        return {"ok": False, "proveedor": proveedor, "modelo": modelo,
+                "mensaje": "No se ingresó ninguna clave."}
+    try:
+        from openai import OpenAI
+        cliente = OpenAI(api_key=api_key, base_url=base_url or url, timeout=15, max_retries=0)
+        respuesta = cliente.chat.completions.create(
+            model=modelo, max_completion_tokens=5,
+            messages=[{"role": "user", "content": "Responde solo: ok"}],
+        )
+        usado = getattr(respuesta, "model", modelo) or modelo
+        return {"ok": True, "proveedor": proveedor, "modelo": usado,
+                "mensaje": f"Clave válida. {proveedor} respondió con el modelo «{usado}»."}
+    except Exception as exc:
+        detalle = str(exc).strip() or exc.__class__.__name__
+        return {"ok": False, "proveedor": proveedor, "modelo": modelo,
+                "mensaje": f"La clave no funcionó con {proveedor}: {detalle[:400]}"}
+
+
 def consultar(pregunta, contexto, *, api_key="", modelo="", historial=(), cliente=None,
               proveedor="OpenAI", base_url=""):
     """Devuelve texto, trazas y fuentes verificadas por identificador.

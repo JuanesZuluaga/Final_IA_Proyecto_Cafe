@@ -75,6 +75,20 @@ export GROQ_API_KEY="tu_clave"      # o OPENAI_API_KEY / NVIDIA_API_KEY
 python -m streamlit run app.py
 ```
 
+### Comprobar que la clave se está usando
+
+En la pestaña del asistente, con el modo **Agente LLM**, usa el botón **"Probar conexión"**:
+hace una llamada mínima real al proveedor y muestra si la clave es válida y con qué
+modelo respondió, o el error exacto si falla. La leyenda "🔑 Clave: ..." indica además
+si la clave que se usará viene de la interfaz o de la variable de entorno.
+
+También puedes verificarlo desde la terminal, sin levantar la app:
+
+```bash
+export GROQ_API_KEY="tu_clave"
+python -m scripts.evaluar --check --proveedor Groq
+```
+
 Opcionalmente puedes forzar otro modelo con la variable `CAFE_MODEL`.
 
 > **Nota:** los proveedores retiran y renombran modelos con frecuencia. Si una
